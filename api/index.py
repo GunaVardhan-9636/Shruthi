@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
+from mangum import Mangum
 
 # ==========================================
 # 1. API CONFIGURATION
@@ -164,4 +165,8 @@ async def analyze_stream(file: UploadFile = File(...), x_gemini_api_key: Optiona
 @app.get("/api/health")
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "AI Emergency Monitor API", "deployment": "Vercel"}
+    return {"status": "ok", "service": "AI Emergency Monitor API", "deployment": "Netlify/Vercel"}
+
+# Wrap the app for Netlify Functions (AWS Lambda)
+handler = Mangum(app)
+
