@@ -12,26 +12,15 @@ import google.generativeai as genai
 # ==========================================
 # 1. API CONFIGURATION
 # ==========================================
-GOOGLE_API_KEY = "AIzaSyDUZ_wSjQfox67lvDQIWKrAuaIoI3_IfGo" 
-genai.configure(api_key=GOOGLE_API_KEY)
+# Read API key from environment variable for Vercel deployment
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 # ==========================================
 # 2. MODEL SELECTION
 # ==========================================
-print("Finding the best available model...")
-model_name = None
-try:
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            if 'flash' in m.name:
-                model_name = m.name
-                break
-except Exception as e:
-    print(f"Error fetching models: {e}")
-
-if not model_name:
-    model_name = 'models/gemini-2.5-flash'
-print(f"Using Model: {model_name}")
+model_name = 'models/gemini-2.5-flash'
 model = genai.GenerativeModel(model_name)
 
 # ==========================================
@@ -39,10 +28,10 @@ model = genai.GenerativeModel(model_name)
 # ==========================================
 app = FastAPI(title="AI Emergency Monitor Backend")
 
-# Allow requests from the Vite frontend (usually port 5173 or 5174)
+# Allow requests from the Vite frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict to frontend URL
+    allow_origins=["*"], # In production, this allows Vercel multi-deployment access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +72,7 @@ Output STRICTLY as a JSON object with the following schema:
 """
 
 # ==========================================
-# 5. CORE BUSINESS LOGIC (Extracted from Gradio)
+# 5. CORE BUSINESS LOGIC
 # ==========================================
 def process_audio_file(filepath: str, prompt: str, mime_type: str = "audio/webm"):
     upload = None
@@ -118,8 +107,7 @@ def process_audio_file(filepath: str, prompt: str, mime_type: str = "audio/webm"
 def apply_custom_key(custom_key: Optional[str]):
     if custom_key:
         genai.configure(api_key=custom_key)
-    else:
-        # Fallback to the default environment key
+    elif GOOGLE_API_KEY:
         genai.configure(api_key=GOOGLE_API_KEY)
 
 @app.post("/api/analyze/standard")
@@ -145,10 +133,7 @@ async def analyze_standard(file: UploadFile = File(...), x_gemini_api_key: Optio
 
 @app.post("/api/analyze/stream")
 async def analyze_stream(file: UploadFile = File(...), x_gemini_api_key: Optional[str] = Header(None)):
-    """Receives a 5-second chunk from the live microphone.
-    Optimized: For small 5s chunks, we send the binary payload inline 
-    to avoid burning through the Gemini File API quotas and processing delays.
-    """
+    """Receives a 5-second chunk from the live microphone."""
     try:
         apply_custom_key(x_gemini_api_key)
         audio_bytes = await file.read()
@@ -165,7 +150,7 @@ async def analyze_stream(file: UploadFile = File(...), x_gemini_api_key: Optiona
             "data": audio_bytes
         }
         
-        print("Analyzing 5s chunk inline with Gemini (Optimized Route)...")
+        print("Analyzing 5s chunk inline with Gemini...")
         response = model.generate_content(
             [emergency_prompt, inline_audio],
             generation_config={"response_mime_type": "application/json"}
@@ -176,12 +161,7 @@ async def analyze_stream(file: UploadFile = File(...), x_gemini_api_key: Optiona
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/health")
+@app.get("/")
 async def health_check():
-    return {"status": "ok", "service": "AI Emergency Monitor API"}
-
-if __name__ == "__main__":
-    import uvicorn
-    # Use standard 8000 for backend
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    return {"status": "ok", "service": "AI Emergency Monitor API", "deployment": "Vercel"}

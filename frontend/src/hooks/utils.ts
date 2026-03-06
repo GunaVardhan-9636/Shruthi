@@ -1,6 +1,6 @@
 import type { AnalysisPayload } from '../types';
 
-export const API_URL = 'http://localhost:8000/api/analyze/standard';
+export const API_URL = '/api/analyze/standard';
 
 export const parseGeminiResponse = (text: string): AnalysisPayload => {
   let threatLevel = "LOW";
