@@ -34,22 +34,34 @@ function App() {
   // ── Recording ────────────────────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-
+  
+  // ── Live Stream ──────────────────────────────────────────────────────────
+  const liveIntervalRef = useRef<number | null>(null);
+  
   // ── Analysis ─────────────────────────────────────────────────────────────
   const analyze = useCallback(async (audioBlob: Blob) => {
     setIsProcessing(true);
     try {
       const formData = new FormData();
-      formData.append('audio', audioBlob, 'audio.wav');
-      formData.append('api_key', apiKey);
+      formData.append('file', audioBlob, 'audio.webm'); // Backend expects 'file'
 
-      const response = await fetch(API_URL, { method: 'POST', body: formData });
+      const response = await fetch(API_URL, { 
+        method: 'POST', 
+        headers: {
+          'x-gemini-api-key': apiKey || ''
+        },
+        body: formData 
+      });
       const data = await response.json();
       const rawText = data.analysis ?? data.result ?? JSON.stringify(data);
+      
+      // Clean up markdown block if Gemini wraps it
+      const cleanedText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-      const { threatLevel, colorClass, scenario, isAlert } = parseGeminiResponse(rawText);
+      const { threatLevel, colorClass, scenario, isAlert } = parseGeminiResponse(cleanedText);
       setCurrentThreat(threatLevel);
       setThreatColor(colorClass);
       setCurrentScenario(scenario);
@@ -58,12 +70,16 @@ function App() {
       const newLog: LogEntry = {
         id: Date.now().toString(),
         timestamp: new Date().toLocaleTimeString(),
-        content: rawText,
+        content: cleanedText,
       };
       setLogs(prev => [newLog, ...prev].slice(0, 50));
-      if (isAlert) setActiveModule('reports');
+      
+      // AUTO-NAVIGATION REQUIREMENT: ALWAYS fly to Threat Intelligence (reports)
+      setActiveModule('reports');
+      
     } catch (err) {
-      console.error(err);
+      console.error("Backend Error:", err);
+      setCurrentScenario("Connection failed. Check backend server.");
     } finally {
       setIsProcessing(false);
     }
@@ -74,23 +90,110 @@ function App() {
   }, [file, analyze]);
 
   const startRecording = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mr = new MediaRecorder(stream);
-    chunksRef.current = [];
-    mr.ondataavailable = e => chunksRef.current.push(e.data);
-    mr.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'audio/wav' });
-      analyze(blob);
-    };
-    mr.start();
-    mediaRecorderRef.current = mr;
-    setIsRecording(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setActiveStream(stream);
+
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = e => chunksRef.current.push(e.data);
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/wav' });
+        analyze(blob);
+        stream.getTracks().forEach(track => track.stop());
+        setActiveStream(null);
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+    } catch (e) {
+      console.error("Mic access denied", e);
+    }
   }, [analyze]);
 
   const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecording(false);
   }, []);
+
+  // ── Live Monitoring ──────────────────────────────────────────────────────
+  const analyzeLiveChunk = useCallback(async (audioBlob: Blob) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', audioBlob, 'chunk.webm');
+
+      const response = await fetch("http://localhost:8000/api/analyze/stream", { 
+        method: 'POST', 
+        headers: { 'x-gemini-api-key': apiKey || '' },
+        body: formData 
+      });
+      const data = await response.json();
+      const rawText = data.analysis ?? data.result ?? JSON.stringify(data);
+      const cleanedText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+      const { threatLevel, colorClass, scenario, isAlert } = parseGeminiResponse(cleanedText);
+      setCurrentThreat(threatLevel);
+      setThreatColor(colorClass);
+      setCurrentScenario(scenario);
+      setIsAlertMode(isAlert);
+
+      const newLog: LogEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleTimeString(),
+        content: cleanedText,
+      };
+      setLogs(prev => [newLog, ...prev].slice(0, 50));
+      if (isAlert) setActiveModule('reports');
+    } catch (err) {
+      console.error("Stream chunk analysis failed:", err);
+    }
+  }, [apiKey]);
+
+  const startLiveMonitor = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setActiveStream(stream);
+      setIsRecording(true);
+      setCurrentScenario("Live monitoring engaged. Processing ambient audio...");
+      setThreatColor('warning');
+
+      // Record in 5-second chunks
+      const recordChunk = () => {
+        const mr = new MediaRecorder(stream);
+        const chunkData: Blob[] = [];
+        mr.ondataavailable = e => chunkData.push(e.data);
+        mr.onstop = () => {
+          if (chunkData.length > 0) {
+            const blob = new Blob(chunkData, { type: 'audio/webm' });
+            analyzeLiveChunk(blob);
+          }
+        };
+        mr.start();
+        setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 5000);
+      };
+
+      recordChunk(); // Start first chunk immediately
+      liveIntervalRef.current = window.setInterval(recordChunk, 5100);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      setCurrentScenario("Microphone permission denied. Cannot start live monitor.");
+    }
+  }, [analyzeLiveChunk]);
+
+  const stopLiveMonitor = useCallback(() => {
+    if (liveIntervalRef.current) {
+      window.clearInterval(liveIntervalRef.current);
+      liveIntervalRef.current = null;
+    }
+    if (activeStream) {
+       activeStream.getTracks().forEach(t => t.stop());
+       setActiveStream(null);
+    }
+    setIsRecording(false);
+    setCurrentScenario("Monitoring disengaged.");
+  }, [activeStream]);
 
   // ── Voice Navigation ─────────────────────────────────────────────────────
   const handleVoiceNavigate = useCallback((module: ModuleKey) => {
@@ -157,8 +260,8 @@ function App() {
         handleFileUpload={handleFileUpload}
         startManualRecording={startRecording}
         stopRecording={stopRecording}
-        startLiveMonitor={startRecording}
-        stopLiveMonitor={stopRecording}
+        startLiveMonitor={startLiveMonitor}
+        stopLiveMonitor={stopLiveMonitor}
         tempApiKey={tempApiKey}
         setTempApiKey={setTempApiKey}
         setApiKey={setApiKey}
@@ -168,6 +271,7 @@ function App() {
         currentScenario={currentScenario}
         logs={logs}
         apiKey={apiKey}
+        activeStream={activeStream}
       />
 
       <VoiceController onNavigate={handleVoiceNavigate} onReturn={handleReturn} />

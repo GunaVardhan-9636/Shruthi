@@ -12,7 +12,7 @@ import google.generativeai as genai
 # ==========================================
 # 1. API CONFIGURATION
 # ==========================================
-GOOGLE_API_KEY = "AIzaSyBDvL-ghqn9Foj2wD0qPUwkwn_yNJc2QNk" 
+GOOGLE_API_KEY = "AIzaSyDUZ_wSjQfox67lvDQIWKrAuaIoI3_IfGo" 
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # ==========================================
@@ -49,49 +49,37 @@ app.add_middleware(
 )
 
 # ==========================================
-# 4. PROMPTS
+# 4. PROMPTS (JSON STRUCTURED)
 # ==========================================
 standard_prompt = """
-Listen to this audio carefully. It may contain speech in **English** or any **Indian Language** (Hindi, Telugu, Tamil, Malayalam, Kannada, Bengali, Marathi, etc.), or a mix of both.
+Listen to this audio carefully. It may contain speech in **English** or any **Indian Language** (Hindi, Telugu, Tamil, Malayalam, Kannada, Bengali, Marathi, etc.), or a mix of both, or just background sounds.
 
-Perform the following analysis in a structured format:
-
-1. **Language Detection**:
-   - Identify the primary language(s) spoken in the clip.
-
-2. **Timeline Analysis ⏱️**:
-   - Provide a chronological, timestamped breakdown of events in the audio.
-   - Format example: `[00:00 - 00:05] Sound of traffic and honking.`
-   - Format example: `[00:06 - 00:15] Person 1 speaks in Hindi.`
-   - Include both significant background sounds and speech segments.
-
-3. **Verbatim Transcription**:
-   - Write exactly what was said.
-   - If it is English, write in English.
-   - If it is an Indian language, write in the **Native Script** (e.g., Telugu script).
-
-4. **English Translation**:
-   - If the speech is NOT in English, provide a clear translation.
-   - If it is already in English, just say "N/A".
-
-5. **Scenario Analysis (The Core Task)**:
-   - Listen to the **Background Sounds** (traffic, announcements, nature, machines, etc.).
-   - Combine the **Speech Meaning** with the **Sounds**.
-   - **FINAL ANSWER**: Describe the full scenario. What is the person doing, where are they, and what is happening around them?
+Perform the analysis and output STRICTLY as a JSON object with the following schema:
+{
+  "language_detection": "Primary language(s) spoken, or 'None' if no speech.",
+  "timeline_analysis": "Chronological breakdown of events. e.g. [00:00-00:05] sound of traffic...",
+  "verbatim_transcription": "Exact transcription in Native Script or English.",
+  "english_translation": "Clear English translation of the speech, or 'N/A'.",
+  "sounds_detected": "Brief description of background noises like traffic, machines, etc.",
+  "scenario_analysis": "Describe the full scenario. What is the person doing, where are they?",
+  "emergency_detected": "YES or NO",
+  "threat_level": "LOW, MEDIUM, or HIGH"
+}
 """
 
 emergency_prompt = """
 You are an AI Emergency Monitoring System. Listen to this short audio clip. 
 Your ONLY job is to detect if an emergency is occurring. 
-Listen for:
-- Keywords: "Help", "Bachao", "Kaapaadunga", "Stop", "Fire", etc.
-- Sounds: Screaming, crying, glass breaking, loud crashes, gunshots, or aggressive altercations.
+Listen for keywords (Help, Bachao, Fire, etc.) and sounds (Screaming, crashes, gunshots).
 
-Output STRICTLY in this format:
-🚨 EMERGENCY DETECTED: [YES or NO]
-🔊 SOUNDS DETECTED: [Brief 1-sentence description of background noises]
-🗣️ TRANSCRIPT/TRANSLATION: [What was said, translated to English if needed. If nothing, write N/A]
-⚠️ THREAT LEVEL: [LOW, MEDIUM, or HIGH]
+Output STRICTLY as a JSON object with the following schema:
+{
+  "emergency_detected": "YES or NO",
+  "sounds_detected": "Brief 1-sentence description of background noises",
+  "english_translation": "What was said, translated to English. Or 'N/A'.",
+  "threat_level": "LOW, MEDIUM, or HIGH",
+  "scenario_analysis": "Very brief summary of the immediate threat situation."
+}
 """
 
 # ==========================================
@@ -108,7 +96,10 @@ def process_audio_file(filepath: str, prompt: str, mime_type: str = "audio/webm"
             upload = genai.get_file(upload.name)
             
         print("Analyzing with Gemini...")
-        response = model.generate_content([prompt, upload])
+        response = model.generate_content(
+            [prompt, upload],
+            generation_config={"response_mime_type": "application/json"}
+        )
         return response.text
     except Exception as e:
         traceback.print_exc()
@@ -175,7 +166,10 @@ async def analyze_stream(file: UploadFile = File(...), x_gemini_api_key: Optiona
         }
         
         print("Analyzing 5s chunk inline with Gemini (Optimized Route)...")
-        response = model.generate_content([emergency_prompt, inline_audio])
+        response = model.generate_content(
+            [emergency_prompt, inline_audio],
+            generation_config={"response_mime_type": "application/json"}
+        )
         
         return {"success": True, "result": response.text, "timestamp": time.strftime("%H:%M:%S")}
     except Exception as e:

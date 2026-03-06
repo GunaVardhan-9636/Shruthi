@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ModuleKey, LogEntry } from '../../types';
 import { PLANETS } from '../../types';
+import { AudioWaveform } from './AudioWaveform';
 
 interface HolographicPanelProps {
   moduleKey: ModuleKey;
@@ -22,6 +23,7 @@ interface HolographicPanelProps {
   currentScenario: string;
   logs: LogEntry[];
   apiKey: string;
+  activeStream?: MediaStream | null;
 }
 
 export function HolographicPanel(props: HolographicPanelProps) {
@@ -88,7 +90,7 @@ function PanelContent(props: HolographicPanelProps & { accentColor: string }) {
     handleFileUpload, startManualRecording, stopRecording,
     startLiveMonitor, stopLiveMonitor, tempApiKey, setTempApiKey,
     setApiKey, setActiveModule, currentThreat, threatColor,
-    currentScenario, logs, apiKey, accentColor
+    currentScenario, logs, apiKey, activeStream, accentColor
   } = props;
 
   const btnStyle: React.CSSProperties = {
@@ -121,28 +123,42 @@ function PanelContent(props: HolographicPanelProps & { accentColor: string }) {
     case 'manual':
       return (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', height: '60px', margin: '10px 0' }}>
-            {bars.map(i => (
-              <div key={i} style={{ width: '5px', background: isRecording ? accentColor : '#333', borderRadius: '4px', height: isRecording ? `${16 + (i % 4) * 12}px` : '4px', transition: 'all 0.3s', boxShadow: isRecording ? `0 0 8px ${accentColor}` : 'none' }} />
-            ))}
-          </div>
+          {isRecording && activeStream ? (
+            <div style={{ marginBottom: '16px' }}>
+              <AudioWaveform stream={activeStream} color={accentColor} />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', height: '60px', margin: '10px 0' }}>
+              {bars.map(i => (
+                <div key={i} style={{ width: '5px', background: '#333', borderRadius: '4px', height: '4px', transition: 'all 0.3s' }} />
+              ))}
+            </div>
+          )}
+          
           {!isRecording
             ? <button style={btnStyle} onClick={startManualRecording} disabled={isProcessing}>🔴 Initiate Field Recording</button>
-            : <button style={btnStyle} onClick={stopRecording}>⏹ Conclude &amp; Analyze</button>}
+            : <button style={{ ...btnStyle, borderColor: '#fff' }} onClick={stopRecording}>⏹ Conclude &amp; Analyze</button>}
         </div>
       );
 
     case 'live':
       return (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', height: '60px', margin: '10px 0' }}>
-            {bars.map(i => (
-              <div key={i} style={{ width: '5px', background: isRecording ? accentColor : '#333', borderRadius: '4px', height: isRecording ? `${12 + (i % 5) * 10}px` : '4px', transition: 'all 0.3s' }} />
-            ))}
-          </div>
+          {isRecording && activeStream ? (
+            <div style={{ marginBottom: '16px' }}>
+              <AudioWaveform stream={activeStream} color={accentColor} />
+            </div>
+          ) : (
+             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', height: '60px', margin: '10px 0' }}>
+               {bars.map(i => (
+                 <div key={i} style={{ width: '5px', background: '#333', borderRadius: '4px', height: '4px', transition: 'all 0.3s' }} />
+               ))}
+             </div>
+          )}
+          
           {!isRecording
             ? <button style={btnStyle} onClick={startLiveMonitor} disabled={isProcessing}>📡 Engage Live Sensors</button>
-            : <button style={btnStyle} onClick={stopLiveMonitor}>🔴 Disengage Sensors</button>}
+            : <button style={{ ...btnStyle, borderColor: '#fff' }} onClick={stopLiveMonitor}>🔴 Disengage Sensors</button>}
         </div>
       );
 
@@ -163,26 +179,77 @@ function PanelContent(props: HolographicPanelProps & { accentColor: string }) {
 
     case 'reports': {
       const tColor = threatColor === 'critical' ? '#FF2E2E' : threatColor === 'warning' ? '#FFB020' : '#00FF9C';
+      
+      const latestLog = logs[0]?.content || "";
+      let parsedLog: any = {};
+      
+      try {
+        if (latestLog) parsedLog = JSON.parse(latestLog);
+      } catch (e) {
+        console.error("Failed to parse log in panel", e);
+      }
+
+      const language = parsedLog.language_detection;
+      const timeline = parsedLog.timeline_analysis;
+      const transcription = parsedLog.verbatim_transcription;
+      const translation = parsedLog.english_translation;
+      const scenario = parsedLog.scenario_analysis || currentScenario;
+
       return (
-        <div>
-          <div style={{ background: '#0a0a1a', padding: '14px', borderRadius: '12px', marginBottom: '12px', borderLeft: `4px solid ${tColor}` }}>
-            <div style={{ color: '#666', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '5px', fontFamily: 'Orbitron, monospace' }}>THREAT LEVEL</div>
-            <div style={{ color: tColor, fontWeight: 700, fontSize: '1.1rem' }}>{currentThreat}</div>
-          </div>
-          <div style={{ background: '#0a0a1a', padding: '14px', borderRadius: '12px', marginBottom: '12px', borderLeft: '4px solid #333' }}>
-            <div style={{ color: '#666', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '5px', fontFamily: 'Orbitron, monospace' }}>DETECTED SCENARIO</div>
-            <div style={{ fontSize: '0.85rem' }}>{currentScenario}</div>
-          </div>
-          <div style={{ color: '#555', fontSize: '0.7rem', letterSpacing: '2px', fontFamily: 'Orbitron, monospace', marginBottom: '8px' }}>RAW TELEMETRY</div>
-          <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {logs.length === 0 && <p style={{ color: '#444', fontStyle: 'italic', fontSize: '0.8rem' }}>No telemetry data.</p>}
-            {logs.map(log => (
-              <div key={log.id} style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: '#bbb', padding: '8px', background: '#050510', borderLeft: `2px solid ${accentColor}` }}>
-                <span style={{ color: '#555', fontWeight: 700 }}>[{log.timestamp}]</span>{' '}
-                {log.content.substring(0, 120)}{log.content.length > 120 ? '...' : ''}
+        <div style={{ paddingRight: '10px' }}>
+          {/* Top Threat Banner */}
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ flex: 1, background: '#0a0a1a', padding: '14px', borderRadius: '12px', borderLeft: `4px solid ${tColor}`, boxShadow: `0 4px 20px ${tColor}22` }}>
+              <div style={{ color: '#666', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '5px', fontFamily: 'Orbitron, monospace' }}>THREAT LEVEL</div>
+              <div style={{ color: tColor, fontWeight: 700, fontSize: '1.2rem', textShadow: `0 0 10px ${tColor}88` }}>{currentThreat}</div>
+            </div>
+            {language && (
+              <div style={{ flex: 1, background: '#0a0a1a', padding: '14px', borderRadius: '12px', borderLeft: '4px solid #4a90e2' }}>
+                <div style={{ color: '#666', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '5px', fontFamily: 'Orbitron, monospace' }}>LANGUAGE</div>
+                <div style={{ color: '#fff', fontWeight: 600, fontSize: '0.95rem' }}>{language.replace(/^- /, '')}</div>
               </div>
-            ))}
+            )}
           </div>
+
+          {/* Core Scenario */}
+          <div style={{ background: 'linear-gradient(180deg, #111122 0%, #0a0a1a 100%)', padding: '18px', borderRadius: '12px', marginBottom: '16px', border: '1px solid #334', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: tColor }} />
+            <div style={{ color: '#889', fontSize: '0.75rem', letterSpacing: '2px', marginBottom: '8px', fontFamily: 'Orbitron, monospace' }}>EXECUTIVE SCENARIO SUMMARY</div>
+            <div style={{ fontSize: '0.95rem', lineHeight: 1.6, color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>{scenario}</div>
+          </div>
+
+          {/* Timeline & Transcripts if available */}
+          {latestLog ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {timeline && (
+                <div style={{ background: '#05050a', padding: '14px', borderRadius: '8px', border: '1px solid #223' }}>
+                  <div style={{ color: '#556', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '8px', fontFamily: 'Orbitron, monospace' }}>TIMELINE ANALYSIS</div>
+                  <div style={{ fontSize: '0.85rem', color: '#aaa', whiteSpace: 'pre-wrap', fontFamily: 'monospace', lineHeight: 1.5 }}>{timeline}</div>
+                </div>
+              )}
+              
+              {(transcription || translation) && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                   {transcription && (
+                    <div style={{ background: '#05050a', padding: '14px', borderRadius: '8px', border: '1px solid #223' }}>
+                      <div style={{ color: '#556', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '8px', fontFamily: 'Orbitron, monospace' }}>TRANSCRIPTION</div>
+                      <div style={{ fontSize: '0.85rem', color: '#cbd5e1', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>"{transcription}"</div>
+                    </div>
+                   )}
+                   {translation && translation.trim() !== "N/A" && (
+                    <div style={{ background: '#05050a', padding: '14px', borderRadius: '8px', border: '1px solid #223' }}>
+                      <div style={{ color: '#556', fontSize: '0.7rem', letterSpacing: '2px', marginBottom: '8px', fontFamily: 'Orbitron, monospace' }}>ENGLISH TRANSLATION</div>
+                      <div style={{ fontSize: '0.85rem', color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>"{translation}"</div>
+                    </div>
+                   )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: '30px', textAlign: 'center', color: '#555', fontStyle: 'italic' }}>
+              No telemetry data available. Submit audio to begin analysis.
+            </div>
+          )}
         </div>
       );
     }
